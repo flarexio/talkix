@@ -1,0 +1,25 @@
+line:
+  messaging:
+    channelToken: LINE_MESSAGING_API_TOKEN
+    channelSecret: LINE_MESSAGING_API_SECRET
+    webhookURL: https://talkix.flarex.io/webhook/line
+  login:
+    authURL: https://identity.flarex.io/auth/line
+
+identity:
+  serverURL: https://127.0.0.1:8443
+  caFile: ca.crt
+  certFile: client.crt
+  keyFile: client.key
+
+tools:
+  mcpServers:
+    time:
+      transport: stdio
+      command: uvx
+      args: [ "mcp-server-time", "--local-timezone=Asia/Taipei" ]
+
+  weather:
+    # baseURL: https://api.openweathermap.org
+    apiKey: WEATHER_API_KEY
+    timeout: 10s
