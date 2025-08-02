@@ -1,17 +1,8 @@
-package message
+package talkix
 
 import (
 	"encoding/json"
 	"time"
-)
-
-type Platform string
-
-const (
-	LINE     Platform = "line"
-	Telegram Platform = "telegram"
-	Slack    Platform = "slack"
-	Discord  Platform = "discord"
 )
 
 type Message interface {

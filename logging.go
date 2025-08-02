@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-
-	"github.com/flarexio/talkix/message"
 )
 
 func LoggingMiddleware(name string) ServiceMiddleware {
@@ -28,12 +26,14 @@ type loggingMiddleware struct {
 	next Service
 }
 
-func (mw *loggingMiddleware) ReplyMessage(ctx context.Context, msg message.Message) (message.Message, error) {
+func (mw *loggingMiddleware) ReplyMessage(ctx context.Context, msg Message) (Message, error) {
 	log := mw.log.With(
 		zap.String("action", "reply_message"),
 		zap.String("content", msg.Content()),
 		zap.Time("timestamp", msg.Timestamp()),
 	)
+
+	log.Info("replying to message")
 
 	reply, err := mw.next.ReplyMessage(ctx, msg)
 	if err != nil {

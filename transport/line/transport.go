@@ -14,15 +14,16 @@ import (
 	line "github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"github.com/flarexio/talkix"
-	"github.com/flarexio/talkix/message"
+	"github.com/flarexio/talkix/config"
+	"github.com/flarexio/talkix/user"
 )
 
 var (
-	cfg talkix.LineConfig
+	cfg config.LineConfig
 	bot *line.MessagingApiAPI
 )
 
-func Init(config talkix.LineConfig) error {
+func Init(config config.LineConfig) error {
 	api, err := line.NewMessagingApiAPI(config.Messaging.ChannelToken)
 	if err != nil {
 		return err
@@ -33,7 +34,7 @@ func Init(config talkix.LineConfig) error {
 	return nil
 }
 
-type DirectIdentityUser func(username string) (*talkix.User, error)
+type DirectIdentityUser func(username string) (*user.UserProfile, error)
 
 func MessageHandler(endpoint endpoint.Endpoint, directIdentityUser DirectIdentityUser) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -54,21 +55,17 @@ func MessageHandler(endpoint endpoint.Endpoint, directIdentityUser DirectIdentit
 		for _, event := range cb.Events {
 			switch e := event.(type) {
 			case webhook.MessageEvent:
-				var user *talkix.User
+				u := new(user.User)
 
 				switch source := e.Source.(type) {
 				case webhook.UserSource:
-					fmt.Printf("Received message from user: %s\n", source.UserId)
-					u, err := directIdentityUser(source.UserId)
+					u.ID = source.UserId
+
+					profile, err := directIdentityUser(source.UserId)
 					if err == nil {
-						user = u
+						u.Profile = profile
+						u.Verified = true
 					}
-
-				case webhook.GroupSource:
-					fmt.Printf("Received message from group: %s\n", source.GroupId)
-
-				case webhook.RoomSource:
-					fmt.Println("Received message from room:", source.RoomId)
 
 				default:
 					err := fmt.Errorf("unsupported source type: %T", source)
@@ -80,13 +77,11 @@ func MessageHandler(endpoint endpoint.Endpoint, directIdentityUser DirectIdentit
 
 				switch msg := e.Message.(type) {
 				case webhook.TextMessageContent:
-					req := message.NewTextMessage(msg.Text)
+					req := talkix.NewTextMessage(msg.Text)
 					req.SetTimestamp(time.UnixMilli(e.Timestamp))
 
 					ctx := context.Background()
-					if user != nil {
-						ctx = context.WithValue(ctx, talkix.ContextKeyUser, user)
-					}
+					ctx = context.WithValue(ctx, talkix.UserKey, u)
 
 					reply, err := endpoint(ctx, req)
 					if err != nil {
@@ -97,7 +92,7 @@ func MessageHandler(endpoint endpoint.Endpoint, directIdentityUser DirectIdentit
 					}
 
 					switch replyMsg := reply.(type) {
-					case *message.TextMessage:
+					case *talkix.TextMessage:
 						_, err := bot.ReplyMessage(&line.ReplyMessageRequest{
 							ReplyToken: e.ReplyToken,
 							Messages: []line.MessageInterface{
@@ -114,7 +109,7 @@ func MessageHandler(endpoint endpoint.Endpoint, directIdentityUser DirectIdentit
 							return
 						}
 
-					case *message.FlexMessage:
+					case *talkix.FlexMessage:
 						container, err := line.UnmarshalFlexContainer(replyMsg.Flex)
 						if err != nil {
 							c.String(http.StatusInternalServerError, err.Error())

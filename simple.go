@@ -6,11 +6,11 @@ import (
 	"errors"
 	"text/template"
 
-	"github.com/flarexio/talkix/message"
+	"github.com/flarexio/talkix/config"
 	"github.com/flarexio/talkix/templates"
 )
 
-func NewSimpleService(cfg LineConfig) Service {
+func NewSimpleService(cfg config.LineConfig) Service {
 	templates := map[string]*template.Template{
 		"login": templates.LoginTemplate(cfg.Login.AuthURL),
 	}
@@ -22,12 +22,12 @@ func NewSimpleService(cfg LineConfig) Service {
 }
 
 type simpleService struct {
-	cfg       LineConfig
+	cfg       config.LineConfig
 	templates map[string]*template.Template
 }
 
-func (svc *simpleService) ReplyMessage(ctx context.Context, msg message.Message) (message.Message, error) {
-	m, ok := msg.(*message.TextMessage)
+func (svc *simpleService) ReplyMessage(ctx context.Context, msg Message) (Message, error) {
+	m, ok := msg.(*TextMessage)
 	if !ok {
 		return nil, errors.New("invalid message type")
 	}
@@ -48,11 +48,11 @@ func (svc *simpleService) ReplyMessage(ctx context.Context, msg message.Message)
 			return nil, err
 		}
 
-		return message.NewFlexMessage(
+		return NewFlexMessage(
 			"Please Login to Continue",
 			buf.Bytes(),
 		), nil
 	}
 
-	return message.NewTextMessage("Copy cat: " + m.Text), nil
+	return NewTextMessage("Copy cat: " + m.Text), nil
 }

@@ -7,18 +7,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/flarexio/talkix/message"
+	"github.com/flarexio/talkix/config"
 )
 
 func TestSimpleService(t *testing.T) {
 	assert := assert.New(t)
 
-	var cfg LineConfig
+	var cfg config.LineConfig
 	svc := NewSimpleService(cfg)
 
 	ctx := context.Background()
 
-	msg := message.NewTextMessage("Hello, world!")
+	msg := NewTextMessage("Hello, world!")
 
 	reply, err := svc.ReplyMessage(ctx, msg)
 	if err != nil {
@@ -26,7 +26,7 @@ func TestSimpleService(t *testing.T) {
 		return
 	}
 
-	replyMsg, ok := reply.(*message.TextMessage)
+	replyMsg, ok := reply.(*TextMessage)
 	if !ok {
 		err := errors.New("expected TextMessage type")
 		assert.Fail(err.Error())

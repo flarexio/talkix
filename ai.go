@@ -8,8 +8,12 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/flarexio/talkix/message"
+	"github.com/flarexio/talkix/config"
+	"github.com/flarexio/talkix/llm"
+	"github.com/flarexio/talkix/llm/message"
+	"github.com/flarexio/talkix/session"
 	"github.com/flarexio/talkix/templates"
+	"github.com/flarexio/talkix/user"
 )
 
 const SYSTEM_PROMPT = `You are a helpful assistant for the LINE messaging platform.
@@ -32,6 +36,8 @@ Instructions:
    - "values": an object with keys "login", "weather", "restaurant". Only fill the one matching the template, others set to null.
 6. Do not include any extra fields or properties.
 7. When a tool is available for a query, always use the tool to get the latest information. Do not rely on your own internal knowledge.
+8. When a query requires a location, you MUST first use the maps_geocode tool to get the coordinates, then use the result for any further map or place queries. Do NOT guess or generate coordinates yourself.
+9. The "query" field for maps_search_places should include both the user's intent and any specific place name or context, and the "location" field MUST come from the maps_geocode tool result.
 
 Available tools:
 - Time: Query the current time.
@@ -54,8 +60,15 @@ Field definitions:
 Notes:
 - For the weather template, always fill the "ExtraInfo" field with an AI-generated suggestion or any additional information relevant to the user's query. If there is nothing extra to add, set it to an empty string.`
 
-func SystemPrompt() (PromptFormat, error) {
-	tmpl, err := template.New("system_prompt").Parse(SYSTEM_PROMPT)
+type PromptTemplate func(ctx context.Context) (string, error)
+
+func SystemPrompt(prompt string) (PromptTemplate, error) {
+	promptTemplate := SYSTEM_PROMPT
+	if prompt != "" {
+		promptTemplate = prompt
+	}
+
+	tmpl, err := template.New("system_prompt").Parse(promptTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -63,17 +76,17 @@ func SystemPrompt() (PromptFormat, error) {
 	return func(ctx context.Context) (string, error) {
 		var userProfile string
 
-		user, ok := ctx.Value(ContextKeyUser).(*User)
-		if !ok {
+		u, ok := ctx.Value(UserKey).(*user.User)
+		if !ok || !u.Verified {
 			userProfile = "(NULL)"
-		}
+		} else {
+			bs, err := json.Marshal(&u.Profile)
+			if err != nil {
+				return "", err
+			}
 
-		bs, err := json.Marshal(user)
-		if err != nil {
-			return "", err
+			userProfile = string(bs)
 		}
-
-		userProfile = string(bs)
 
 		values := map[string]any{
 			"UserProfile": userProfile,
@@ -88,16 +101,17 @@ func SystemPrompt() (PromptFormat, error) {
 	}, nil
 }
 
-func NewAIService(cfg LineConfig, tools []Tool) (Service, error) {
-	prompt, err := SystemPrompt()
+func NewAIService(cfg config.Config, tools []llm.Tool,
+	users user.Repository, sessions session.Repository,
+) (Service, error) {
+	prompt, err := SystemPrompt(cfg.LLM.Prompt)
 	if err != nil {
 		return nil, err
 	}
 
-	llm, err := NewLLM("openai:gpt-4.1",
-		WithPromptFormat(prompt),
-		WithTools(tools),
-		WithStructuredOutput(LineMessage{}),
+	llm, err := llm.NewLLM(cfg.LLM.Model,
+		llm.WithTools(tools),
+		llm.WithStructuredOutput(LineMessage{}),
 	)
 
 	if err != nil {
@@ -105,30 +119,113 @@ func NewAIService(cfg LineConfig, tools []Tool) (Service, error) {
 	}
 
 	templates := map[string]*template.Template{
-		"login":      templates.LoginTemplate(cfg.Login.AuthURL),
+		"login":      templates.LoginTemplate(cfg.Line.Login.AuthURL),
 		"weather":    templates.WeatherTemplate(),
 		"restaurant": templates.RestaurantTemplate(),
 	}
 
 	return &aiService{
 		llm:       llm,
+		prompt:    prompt,
 		templates: templates,
+		users:     users,
+		sessions:  sessions,
 	}, nil
 }
 
 type aiService struct {
-	llm       *LLM
+	llm       *llm.LLM
+	prompt    PromptTemplate
 	templates map[string]*template.Template
+	users     user.Repository
+	sessions  session.Repository
 }
 
-func (svc *aiService) ReplyMessage(ctx context.Context, msg message.Message) (message.Message, error) {
-	m, ok := msg.(*message.TextMessage)
+func (svc *aiService) ReplyMessage(ctx context.Context, msg Message) (Message, error) {
+	userCtx, ok := ctx.Value(UserKey).(*user.User)
+	if !ok {
+		return nil, errors.New("user not found in context")
+	}
+
+	u, err := svc.users.Find(userCtx.ID)
+	if err != nil {
+		u = userCtx
+	}
+
+	u.Profile = userCtx.Profile
+	u.Verified = userCtx.Verified
+
+	var s *session.Session
+	if u.SelectedSessionID == "" {
+		s = session.NewSession(u.ID)
+		u.SessionIDs = append(u.SessionIDs, s.ID)
+		u.SelectedSessionID = s.ID
+	} else {
+		found, err := svc.sessions.Find(u.SelectedSessionID)
+		if err != nil {
+			return nil, err
+		}
+
+		s = found
+	}
+
+	prompt := "You are a helpful assistant."
+	if svc.prompt != nil {
+		p, err := svc.prompt(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		prompt = p
+	}
+
+	msgs := []message.Message{
+		message.SystemMessage(prompt),
+	}
+
+	if len(s.Conversations) > 0 {
+		latestConv := s.Conversations[len(s.Conversations)-1]
+		history := latestConv.TrimMessages(5)
+
+		msgs = append(msgs, history...)
+	}
+
+	m, ok := msg.(*TextMessage)
 	if !ok {
 		return nil, errors.New("invalid message type")
 	}
 
+	msgs = append(msgs, message.HumanMessage(m.Text))
+
+	for _, m := range msgs {
+		m.PrettyPrint()
+	}
+
+	msgs, err = svc.llm.Invoke(ctx, msgs)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(msgs) == 0 {
+		return nil, errors.New("no messages")
+	}
+
+	for _, m := range msgs {
+		m.PrettyPrint()
+	}
+
+	resp := msgs[len(msgs)-1]
+
+	c := session.NewConversation()
+	c.SetIO(m.Text, resp.Content)
+	c.AddMessage(msgs...)
+	s.AddConversation(c)
+
+	svc.sessions.Save(s)
+	svc.users.Save(u)
+
 	var reply LineMessage
-	if err := svc.llm.Invoke(ctx, m.Text, &reply); err != nil {
+	if err := json.Unmarshal([]byte(resp.Content), &reply); err != nil {
 		return nil, err
 	}
 
@@ -138,14 +235,14 @@ func (svc *aiService) ReplyMessage(ctx context.Context, msg message.Message) (me
 			return nil, errors.New("text message content is empty")
 		}
 
-		return message.NewTextMessage(reply.Text.Text), nil
+		return NewTextMessage(reply.Text.Text), nil
 
 	case "flex":
 		if reply.Flex == nil {
 			return nil, errors.New("flex message content is empty")
 		}
 
-		flexMsg := &message.FlexMessage{
+		flexMsg := &FlexMessage{
 			AltText:   reply.Flex.AltText,
 			Flex:      reply.Flex.Flex,
 			CreatedAt: reply.Flex.CreatedAt,
@@ -184,25 +281,24 @@ type TemplateSpec struct {
 	Values   map[string]any `json:"values"`
 }
 
-type FlexMessage struct {
-	message.FlexMessage
+type FlexMessageWithTemplate struct {
+	FlexMessage
 	TemplateSpec *TemplateSpec `json:"templateSpec,omitempty"`
 }
 
 type LineMessage struct {
-	Type string               `json:"type"`
-	Text *message.TextMessage `json:"text,omitempty"`
-	Flex *FlexMessage         `json:"flex,omitempty"`
+	Type string                   `json:"type"`
+	Text *TextMessage             `json:"text,omitempty"`
+	Flex *FlexMessageWithTemplate `json:"flex,omitempty"`
 }
 
 func (msg *LineMessage) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Type string               `json:"type"`
-		Text *message.TextMessage `json:"text,omitempty"`
+		Type string       `json:"type"`
+		Text *TextMessage `json:"text,omitempty"`
 		Flex *struct {
 			AltText      string `json:"altText"`
 			Flex         string `json:"flex"`
-			Timestamp    int64  `json:"timestamp"`
 			TemplateSpec *struct {
 				Template string         `json:"template"`
 				Values   map[string]any `json:"values"`
@@ -225,15 +321,11 @@ func (msg *LineMessage) UnmarshalJSON(data []byte) error {
 			return errors.New("flex message content is empty")
 		}
 
-		flexMsg := &FlexMessage{
-			FlexMessage: message.FlexMessage{
+		flexMsg := &FlexMessageWithTemplate{
+			FlexMessage: FlexMessage{
 				AltText:   raw.Flex.AltText,
 				CreatedAt: time.Now(),
 			},
-		}
-
-		if raw.Flex.Timestamp > 0 {
-			flexMsg.CreatedAt = time.UnixMilli(raw.Flex.Timestamp)
 		}
 
 		if raw.Flex.Flex == "" && raw.Flex.TemplateSpec == nil {

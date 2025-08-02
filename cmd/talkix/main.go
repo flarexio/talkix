@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/gin-gonic/gin"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -22,7 +23,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/flarexio/talkix"
+	"github.com/flarexio/talkix/config"
+	"github.com/flarexio/talkix/llm"
+	"github.com/flarexio/talkix/persistence/kv"
 	"github.com/flarexio/talkix/transport/line"
+	"github.com/flarexio/talkix/user"
 )
 
 func main() {
@@ -74,16 +79,30 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer f.Close()
 
-	var cfg talkix.Config
+	var cfg config.Config
 	if err := yaml.NewDecoder(f).Decode(&cfg); err != nil {
 		return err
 	}
 
-	tools := []talkix.Tool{
-		talkix.NewWeatherTool(cfg.Tools.Weather),
+	opts := badger.DefaultOptions(filepath.Join(path, cfg.LLM.Persistence.Name))
+	if cfg.LLM.Persistence.InMemory {
+		opts = badger.DefaultOptions("").WithInMemory(true)
 	}
 
-	for _, server := range cfg.Tools.MCPServers {
+	db, err := badger.Open(opts)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	users := kv.NewUserRepository(db)
+	sessions := kv.NewSessionRepository(db)
+
+	tools := []llm.Tool{
+		talkix.NewWeatherTool(cfg.LLM.Tools.Weather),
+	}
+
+	for _, server := range cfg.LLM.Tools.MCPServers {
 		mcpTools, err := registerMCPServer(ctx, server)
 		if err != nil {
 			return err
@@ -92,7 +111,9 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		tools = append(tools, mcpTools...)
 	}
 
-	svc, err := talkix.NewAIService(cfg.Line, tools)
+	svc, err := talkix.NewAIService(cfg, tools,
+		users, sessions,
+	)
 	if err != nil {
 		return err
 	}
@@ -126,7 +147,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func NewMCPTool(tool mcp.Tool, fn callToolFn) talkix.Tool {
+func NewMCPTool(tool mcp.Tool, fn callToolFn) llm.Tool {
 	return &mcpTool{tool, fn}
 }
 
@@ -174,24 +195,24 @@ func (t *mcpTool) Call(ctx context.Context, params map[string]any) (string, erro
 	return content.Text, nil
 }
 
-func registerMCPServer(ctx context.Context, cfg talkix.MCPServerConfig) ([]talkix.Tool, error) {
+func registerMCPServer(ctx context.Context, cfg config.MCPServerConfig) ([]llm.Tool, error) {
 	var (
 		c   *client.Client
 		err error
 	)
 
 	switch cfg.Transport {
-	case talkix.TransportTypeStdio:
+	case config.TransportTypeStdio:
 		c, err = client.NewStdioMCPClient(
 			cfg.Command,
 			cfg.Environment,
 			cfg.Arguments...,
 		)
 
-	case talkix.TransportTypeSSE:
+	case config.TransportTypeSSE:
 		c, err = client.NewSSEMCPClient(cfg.URL)
 
-	case talkix.TransportTypeStreamableHTTP:
+	case config.TransportTypeStreamableHTTP:
 		c, err = client.NewStreamableHttpClient(cfg.URL)
 
 	default:
@@ -225,7 +246,7 @@ func registerMCPServer(ctx context.Context, cfg talkix.MCPServerConfig) ([]talki
 		return c.CallTool(ctx, req)
 	}
 
-	tools := make([]talkix.Tool, 0)
+	tools := make([]llm.Tool, 0)
 
 	var cursor mcp.Cursor
 	for {
@@ -260,7 +281,7 @@ func registerMCPServer(ctx context.Context, cfg talkix.MCPServerConfig) ([]talki
 	return tools, nil
 }
 
-func DirectIdentityUserEndpoint(path string, cfg talkix.IdentityConfig) (line.DirectIdentityUser, error) {
+func DirectIdentityUserEndpoint(path string, cfg config.IdentityConfig) (line.DirectIdentityUser, error) {
 	certFile := filepath.Join(path, "certs", cfg.CertFile)
 	keyFile := filepath.Join(path, "certs", cfg.KeyFile)
 	caFile := filepath.Join(path, "certs", cfg.CaFile)
@@ -289,7 +310,7 @@ func DirectIdentityUserEndpoint(path string, cfg talkix.IdentityConfig) (line.Di
 		},
 	}
 
-	return func(username string) (*talkix.User, error) {
+	return func(username string) (*user.UserProfile, error) {
 		serverURL := cfg.ServerURL
 		resource := "users/" + username
 
@@ -308,11 +329,11 @@ func DirectIdentityUserEndpoint(path string, cfg talkix.IdentityConfig) (line.Di
 			return nil, errors.New(string(errMsg))
 		}
 
-		var user *talkix.User
-		if err := yaml.NewDecoder(resp.Body).Decode(&user); err != nil {
+		var profile *user.UserProfile
+		if err := yaml.NewDecoder(resp.Body).Decode(&profile); err != nil {
 			return nil, err
 		}
 
-		return user, nil
+		return profile, nil
 	}, nil
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/flarexio/talkix/config"
 )
 
 func TestWeatherTool(t *testing.T) {
@@ -19,13 +21,13 @@ func TestWeatherTool(t *testing.T) {
 		return
 	}
 
-	config := WeatherAPIConfig{
+	cfg := config.WeatherAPIConfig{
 		APIKey:  apiKey,
 		BaseURL: "https://api.openweathermap.org",
 		Timeout: 10 * time.Second,
 	}
 
-	tool := NewWeatherTool(config)
+	tool := NewWeatherTool(cfg)
 	weatherTool := tool.(*weatherTool)
 
 	ctx := context.Background()

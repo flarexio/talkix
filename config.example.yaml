@@ -12,14 +12,25 @@ identity:
   certFile: client.crt
   keyFile: client.key
 
-tools:
-  mcpServers:
-    time:
-      transport: stdio
-      command: uvx
-      args: [ "mcp-server-time", "--local-timezone=Asia/Taipei" ]
-
-  weather:
-    # baseURL: https://api.openweathermap.org
-    apiKey: WEATHER_API_KEY
-    timeout: 10s
+llm:
+  model: openai:gpt-4.1-mini
+  # prompt: replace with your prompt here
+  persistence:
+    driver: badger
+    name: talkix
+  tools:
+    mcpServers:
+      time:
+        transport: stdio
+        command: uvx
+        args: [ "mcp-server-time", "--local-timezone=Asia/Taipei" ]
+      google-maps:
+        transport: stdio
+        command: npx
+        args: [ "-y", "@modelcontextprotocol/server-google-maps" ]
+        env:
+        - GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+    weather:
+      # baseURL: https://api.openweathermap.org
+      apiKey: WEATHER_API_KEY
+      timeout: 10s

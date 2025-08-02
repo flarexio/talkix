@@ -9,47 +9,10 @@ import (
 	"net/url"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/flarexio/talkix/config"
+	"github.com/flarexio/talkix/llm"
 )
 
-// WeatherAPIConfig 天氣 API 配置
-type WeatherAPIConfig struct {
-	APIKey  string
-	BaseURL string
-	Timeout time.Duration
-}
-
-func (cfg *WeatherAPIConfig) UnmarshalYAML(value *yaml.Node) error {
-	var raw struct {
-		APIKey  string `yaml:"apiKey"`
-		BaseURL string `yaml:"baseURL"`
-		Timeout string `yaml:"timeout"`
-	}
-
-	if err := value.Decode(&raw); err != nil {
-		return err
-	}
-
-	cfg.APIKey = raw.APIKey
-
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.openweathermap.org"
-	}
-
-	cfg.Timeout = 10 * time.Second
-	if raw.Timeout != "" {
-		duration, err := time.ParseDuration(raw.Timeout)
-		if err != nil {
-			return err
-		}
-
-		cfg.Timeout = duration
-	}
-
-	return nil
-}
-
-// OpenWeatherMap 3.0 API 回應結構
 type OpenWeatherResponse struct {
 	Lat      float64 `json:"lat"`
 	Lon      float64 `json:"lon"`
@@ -78,7 +41,6 @@ type OpenWeatherResponse struct {
 	} `json:"current"`
 }
 
-// Geocoding API 回應結構 (用於獲取座標)
 type GeocodingResponse []struct {
 	Name       string            `json:"name"`
 	LocalNames map[string]string `json:"local_names,omitempty"`
@@ -88,7 +50,6 @@ type GeocodingResponse []struct {
 	State      string            `json:"state,omitempty"`
 }
 
-// 增強的天氣資料結構
 type WeatherData struct {
 	Location    string  `json:"location"`
 	Country     string  `json:"country"`
@@ -112,17 +73,17 @@ type WeatherData struct {
 	LastUpdated string  `json:"last_updated"`
 }
 
-func NewWeatherTool(config WeatherAPIConfig) Tool {
+func NewWeatherTool(cfg config.WeatherAPIConfig) llm.Tool {
 	return &weatherTool{
-		config: config,
+		cfg: cfg,
 		client: &http.Client{
-			Timeout: config.Timeout,
+			Timeout: cfg.Timeout,
 		},
 	}
 }
 
 type weatherTool struct {
-	config WeatherAPIConfig
+	cfg    config.WeatherAPIConfig
 	client *http.Client
 }
 
@@ -225,7 +186,7 @@ type GeoLocation struct {
 
 func (tool *weatherTool) GetCoordinates(ctx context.Context, location string) (*GeoLocation, error) {
 	// 使用 Geocoding API
-	geoURL := fmt.Sprintf("%s/geo/1.0/direct", tool.config.BaseURL)
+	geoURL := fmt.Sprintf("%s/geo/1.0/direct", tool.cfg.BaseURL)
 	u, err := url.Parse(geoURL)
 	if err != nil {
 		return nil, err
@@ -234,7 +195,7 @@ func (tool *weatherTool) GetCoordinates(ctx context.Context, location string) (*
 	query := u.Query()
 	query.Set("q", location)
 	query.Set("limit", "1")
-	query.Set("appid", tool.config.APIKey)
+	query.Set("appid", tool.cfg.APIKey)
 	u.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
@@ -272,7 +233,7 @@ func (tool *weatherTool) GetCoordinates(ctx context.Context, location string) (*
 }
 
 func (tool *weatherTool) FetchWeatherData(ctx context.Context, location, units string) (*WeatherData, error) {
-	if tool.config.APIKey == "" {
+	if tool.cfg.APIKey == "" {
 		return nil, errors.New("weather API key is not configured")
 	}
 
@@ -321,7 +282,7 @@ func (tool *weatherTool) FetchWeatherData(ctx context.Context, location, units s
 
 func (tool *weatherTool) FetchWeatherFromAPI(ctx context.Context, lat, lon float64, units string) (*OpenWeatherResponse, error) {
 	// 使用 One Call API 3.0
-	weatherURL := fmt.Sprintf("%s/data/3.0/onecall", tool.config.BaseURL)
+	weatherURL := fmt.Sprintf("%s/data/3.0/onecall", tool.cfg.BaseURL)
 	u, err := url.Parse(weatherURL)
 	if err != nil {
 		return nil, err
@@ -330,7 +291,7 @@ func (tool *weatherTool) FetchWeatherFromAPI(ctx context.Context, lat, lon float
 	query := u.Query()
 	query.Set("lat", fmt.Sprintf("%.6f", lat))
 	query.Set("lon", fmt.Sprintf("%.6f", lon))
-	query.Set("appid", tool.config.APIKey)
+	query.Set("appid", tool.cfg.APIKey)
 	query.Set("units", units)
 	query.Set("exclude", "minutely,hourly,daily,alerts") // 只要當前天氣
 	u.RawQuery = query.Encode()
