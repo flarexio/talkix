@@ -7,9 +7,17 @@ import (
 )
 
 type Config struct {
+	BaseURL  string         `yaml:"baseURL"`
+	JWT      JWTConfig      `yaml:"jwt"`
 	Line     LineConfig     `yaml:"line"`
 	Identity IdentityConfig `yaml:"identity"`
 	LLM      LLMConfig      `yaml:"llm"`
+}
+
+type JWTConfig struct {
+	Issuer   string `yaml:"issuer"`
+	Audience string `yaml:"audience"`
+	JWKsURL  string `yaml:"jwksURL"`
 }
 
 type LineConfig struct {
@@ -31,10 +39,21 @@ type IdentityConfig struct {
 }
 
 type LLMConfig struct {
-	Model       string      `yaml:"model"`
-	Prompt      string      `yaml:"prompt"`
-	Persistence Persistence `yaml:"persistence"`
-	Tools       ToolsConfig `yaml:"tools"`
+	Model       string           `yaml:"model"`
+	Prompt      string           `yaml:"prompt"`
+	Summary     SummaryLLMConfig `yaml:"summary"`
+	Line        LineLLMConfig    `yaml:"line"`
+	Persistence Persistence      `yaml:"persistence"`
+	Tools       ToolsConfig      `yaml:"tools"`
+}
+
+type SummaryLLMConfig struct {
+	Model string `yaml:"model"`
+}
+
+type LineLLMConfig struct {
+	Model  string `yaml:"model"`
+	Prompt string `yaml:"prompt"`
 }
 
 type PersistenceDriver string

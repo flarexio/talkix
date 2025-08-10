@@ -36,41 +36,43 @@ type Message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-func (m *Message) PrettyPrint() {
-	fmt.Printf("--- %sMessage ---\n", m.Role)
+func (m *Message) PrettyFormat() string {
+	var output string
+
+	output += fmt.Sprintf("--- %sMessage ---\n", m.Role)
 
 	if m.ToolCallID != "" {
-		fmt.Printf("Tool Call ID: %s\n", m.ToolCallID)
+		output += fmt.Sprintf("Tool Call ID: %s\n", m.ToolCallID)
 	}
 
 	if bs := []byte(m.Content); !json.Valid(bs) {
-		fmt.Printf("%s\n", m.Content)
+		output += fmt.Sprintf("%s\n", m.Content)
 	} else {
 		var contentMap map[string]any
 		if err := json.Unmarshal(bs, &contentMap); err != nil {
-			fmt.Printf("%s\n", m.Content)
+			output += fmt.Sprintf("%s\n", m.Content)
 		} else {
 			contentJSON, _ := json.MarshalIndent(contentMap, "", "  ")
-			fmt.Printf("%s\n", contentJSON)
+			output += fmt.Sprintf("%s\n", contentJSON)
 		}
 	}
 
 	if len(m.ToolCalls) > 0 {
-		fmt.Printf("Tool Calls:\n")
+		output += "Tool Calls:\n"
 		for _, tc := range m.ToolCalls {
-			fmt.Printf("- Name: %s (id: %s)\n", tc.Name, tc.ID)
-			fmt.Println("  Arguments:")
+			output += fmt.Sprintf("- Name: %s (id: %s)\n", tc.Name, tc.ID)
+			output += "  Arguments:\n"
 
 			argsJSON, err := json.MarshalIndent(tc.Arguments, "", "  ")
 			if err != nil {
-				fmt.Printf("%v\n", tc.Arguments)
+				output += fmt.Sprintf("  %s\n", tc.Arguments)
 			} else {
-				fmt.Printf("%s\n", argsJSON)
+				output += fmt.Sprintf("%s\n", argsJSON)
 			}
 		}
 	}
 
-	fmt.Print("-------------------\n\n")
+	return output
 }
 
 type ToolCall struct {

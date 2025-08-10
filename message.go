@@ -10,18 +10,22 @@ type Message interface {
 	Content() string
 	Timestamp() time.Time
 	SetTimestamp(time.Time)
+	QuickReply() []string
+	AddQuickReply(...string)
 }
 
 func NewTextMessage(text string) Message {
 	return &TextMessage{
-		Text:      text,
-		CreatedAt: time.Now(),
+		Text:         text,
+		CreatedAt:    time.Now(),
+		QuickReplies: make([]string, 0),
 	}
 }
 
 type TextMessage struct {
-	Text      string
-	CreatedAt time.Time
+	Text         string
+	CreatedAt    time.Time
+	QuickReplies []string
 }
 
 func (m *TextMessage) UnmarshalJSON(data []byte) error {
@@ -60,6 +64,14 @@ func (m *TextMessage) SetTimestamp(t time.Time) {
 	m.CreatedAt = t
 }
 
+func (m *TextMessage) QuickReply() []string {
+	return m.QuickReplies
+}
+
+func (m *TextMessage) AddQuickReply(reply ...string) {
+	m.QuickReplies = append(m.QuickReplies, reply...)
+}
+
 func NewFlexMessage(alt string, flex json.RawMessage) Message {
 	return &FlexMessage{
 		AltText:   alt,
@@ -69,9 +81,10 @@ func NewFlexMessage(alt string, flex json.RawMessage) Message {
 }
 
 type FlexMessage struct {
-	AltText   string
-	Flex      json.RawMessage
-	CreatedAt time.Time
+	AltText      string
+	Flex         json.RawMessage
+	CreatedAt    time.Time
+	QuickReplies []string
 }
 
 func (m *FlexMessage) UnmarshalJSON(data []byte) error {
@@ -113,4 +126,12 @@ func (m *FlexMessage) Timestamp() time.Time {
 
 func (m *FlexMessage) SetTimestamp(t time.Time) {
 	m.CreatedAt = t
+}
+
+func (m *FlexMessage) QuickReply() []string {
+	return m.QuickReplies
+}
+
+func (m *FlexMessage) AddQuickReply(reply ...string) {
+	m.QuickReplies = append(m.QuickReplies, reply...)
 }

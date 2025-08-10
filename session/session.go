@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -13,17 +14,27 @@ func NewSession(userID string) *Session {
 		ID:            ulid.Make().String(),
 		UserID:        userID,
 		Conversations: make([]*Conversation, 0),
+		CreatedAt:     time.Now(),
 	}
 }
 
 type Session struct {
 	ID            string
 	UserID        string
+	Summary       string
 	Conversations []*Conversation
+	CreatedAt     time.Time
 }
 
 func (s *Session) AddConversation(conv *Conversation) {
 	s.Conversations = append(s.Conversations, conv)
+
+	summary, err := GenerateSummary(s.Summary, conv)
+	if err != nil {
+		return
+	}
+
+	s.Summary = summary
 }
 
 func NewConversation() *Conversation {
@@ -38,6 +49,7 @@ type Conversation struct {
 	ID        string
 	Input     string
 	Output    string
+	Format    json.RawMessage
 	Messages  []message.Message
 	CreatedAt time.Time
 }
@@ -45,6 +57,10 @@ type Conversation struct {
 func (c *Conversation) SetIO(input, output string) {
 	c.Input = input
 	c.Output = output
+}
+
+func (c *Conversation) SetFormat(format json.RawMessage) {
+	c.Format = format
 }
 
 func (c *Conversation) AddMessage(message ...message.Message) {

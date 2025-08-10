@@ -13,8 +13,8 @@ import (
 func TestSimpleService(t *testing.T) {
 	assert := assert.New(t)
 
-	var cfg config.LineConfig
-	svc := NewSimpleService(cfg)
+	var cfg config.Config
+	svc := NewSimpleService(cfg, nil, nil, nil)
 
 	ctx := context.Background()
 

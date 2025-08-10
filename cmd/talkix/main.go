@@ -2,12 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,12 +18,16 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 
+	"github.com/flarexio/core/policy"
 	"github.com/flarexio/talkix"
+	"github.com/flarexio/talkix/auth"
 	"github.com/flarexio/talkix/config"
+	"github.com/flarexio/talkix/identity"
 	"github.com/flarexio/talkix/llm"
 	"github.com/flarexio/talkix/persistence/kv"
+	"github.com/flarexio/talkix/session"
+	"github.com/flarexio/talkix/transport/http"
 	"github.com/flarexio/talkix/transport/line"
-	"github.com/flarexio/talkix/user"
 )
 
 func main() {
@@ -84,6 +84,10 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	session.InitLLM(cfg.LLM.Summary.Model)
+
+	otp := auth.NewOTPStore()
+
 	opts := badger.DefaultOptions(filepath.Join(path, cfg.LLM.Persistence.Name))
 	if cfg.LLM.Persistence.InMemory {
 		opts = badger.DefaultOptions("").WithInMemory(true)
@@ -111,30 +115,81 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		tools = append(tools, mcpTools...)
 	}
 
-	svc, err := talkix.NewAIService(cfg, tools,
+	svc, err := talkix.NewAIService(cfg, tools, otp,
 		users, sessions,
 	)
 	if err != nil {
 		return err
 	}
 
-	svc = talkix.LoggingMiddleware("ai")(svc)
+	// svc := talkix.NewSimpleService(cfg, otp, users, sessions)
 
-	endpoint := talkix.ReplyMessageEndpoint(svc)
+	name := svc.Name()
+	svc = talkix.LoggingMiddleware(name)(svc)
 
-	if err := line.Init(cfg.Line); err != nil {
-		return err
+	directUser := identity.DirectUserEndpoint(path, cfg.Identity)
+
+	r := gin.Default()
+	{
+		endpoint := talkix.ReplyMessageEndpoint(svc)
+
+		if err := line.Init(cfg); err != nil {
+			return err
+		}
+
+		handler := line.MessageHandler(endpoint, directUser)
+
+		r.POST("/webhook/line", handler)
 	}
 
-	directIdentityUserEndpoint, err := DirectIdentityUserEndpoint(path, cfg.Identity)
+	sessionSvc := talkix.NewSessionService(users, sessions)
+	sessionSvc = talkix.SessionLoggingMiddleware()(sessionSvc)
+
+	http.Init(cfg.JWT)
+
+	otpAuth := http.OTPAuthorizator(otp, directUser)
+	{
+		r.GET("/users/:user/session/list", otpAuth("list_sessions"), http.SessionViewHandler())
+	}
+
+	permissionsPath := filepath.Join(path, "permissions.json")
+	policy, err := policy.NewRegoPolicy(ctx, permissionsPath)
 	if err != nil {
 		return err
 	}
 
-	handler := line.MessageHandler(endpoint, directIdentityUserEndpoint)
+	jwtAuth := http.JWTAuthorizator(policy, directUser)
+	{
+		// GET /users/:user/sessions
+		{
+			endpoint := talkix.ListSessionsEndpoint(sessionSvc)
+			r.GET("/users/:user/sessions", jwtAuth("talkix::sessions.read"), http.ListSessionsHandler(endpoint))
+		}
 
-	r := gin.Default()
-	r.POST("/webhook/line", handler)
+		// GET /users/:user/sessions/:session
+		{
+			endpoint := talkix.SessionEndpoint(sessionSvc)
+			r.GET("/users/:user/sessions/:session", jwtAuth("talkix::sessions.read"), http.SessionHandler(endpoint))
+		}
+
+		// POST /users/:user/sessions
+		{
+			endpoint := talkix.CreateSessionEndpoint(sessionSvc)
+			r.POST("/users/:user/sessions", jwtAuth("talkix::sessions.create"), http.CreateSessionHandler(endpoint))
+		}
+
+		// PATCH /users/:user/sessions/:session
+		{
+			endpoint := talkix.SwitchSessionEndpoint(sessionSvc)
+			r.PATCH("/users/:user/sessions/:session", jwtAuth("talkix::sessions.update"), http.SwitchSessionHandler(endpoint))
+		}
+
+		// DELETE /users/:user/sessions/:session
+		{
+			endpoint := talkix.DeleteSessionEndpoint(sessionSvc)
+			r.DELETE("/users/:user/sessions/:session", jwtAuth("talkix::sessions.delete"), http.DeleteSessionHandler(endpoint))
+		}
+	}
 
 	go r.Run(":" + strconv.Itoa(cmd.Int("port")))
 
@@ -279,61 +334,4 @@ func registerMCPServer(ctx context.Context, cfg config.MCPServerConfig) ([]llm.T
 	}
 
 	return tools, nil
-}
-
-func DirectIdentityUserEndpoint(path string, cfg config.IdentityConfig) (line.DirectIdentityUser, error) {
-	certFile := filepath.Join(path, "certs", cfg.CertFile)
-	keyFile := filepath.Join(path, "certs", cfg.KeyFile)
-	caFile := filepath.Join(path, "certs", cfg.CaFile)
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return nil, err
-	}
-
-	caCert, err := os.ReadFile(caFile)
-	if err != nil {
-		return nil, err
-	}
-
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-	}
-
-	return func(username string) (*user.UserProfile, error) {
-		serverURL := cfg.ServerURL
-		resource := "users/" + username
-
-		resp, err := client.Get(serverURL + "/" + resource)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			errMsg, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return nil, err
-			}
-
-			return nil, errors.New(string(errMsg))
-		}
-
-		var profile *user.UserProfile
-		if err := yaml.NewDecoder(resp.Body).Decode(&profile); err != nil {
-			return nil, err
-		}
-
-		return profile, nil
-	}, nil
 }

@@ -39,11 +39,31 @@ func NewLLM(model string, opts ...Option) (*LLM, error) {
 type LLM struct {
 	client openai.Client
 	body   openai.ChatCompletionNewParams
+	prompt PromptTemplate
 	tools  map[string]Tool
 }
 
 type Option interface {
 	Apply(*LLM) error
+}
+
+type PromptTemplate func(ctx context.Context) ([]message.Message, error)
+
+func WithPrompt(tmpl PromptTemplate) Option {
+	return &llmWithPrompt{prompt: tmpl}
+}
+
+type llmWithPrompt struct {
+	prompt PromptTemplate
+}
+
+func (opt *llmWithPrompt) Apply(llm *LLM) error {
+	if llm == nil {
+		return errors.New("llm cannot be nil")
+	}
+
+	llm.prompt = opt.prompt
+	return nil
 }
 
 func WithStructuredOutput(schema Schema) Option {
@@ -109,7 +129,28 @@ func (opt *llmWithTools) Apply(llm *LLM) error {
 	return nil
 }
 
-func (llm *LLM) Invoke(ctx context.Context, msgs []message.Message) ([]message.Message, error) {
+func (llm *LLM) Invoke(ctx context.Context, msg string) ([]message.Message, error) {
+	msgs := []message.Message{
+		message.SystemMessage("You are a helpful assistant."),
+	}
+
+	if llm.prompt != nil {
+		messages, err := llm.prompt(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		msgs = messages
+	}
+
+	if msg != "" {
+		msgs = append(msgs, message.HumanMessage(msg))
+	}
+
+	return llm.InvokeWithMessages(ctx, msgs)
+}
+
+func (llm *LLM) InvokeWithMessages(ctx context.Context, msgs []message.Message) ([]message.Message, error) {
 	messages, err := convertToOpenAIMessages(msgs)
 	if err != nil {
 		return nil, err

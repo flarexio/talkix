@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"time"
 )
 
@@ -11,6 +12,26 @@ type User struct {
 
 	SessionIDs        []string `json:"session_ids"`
 	SelectedSessionID string   `json:"selected_session_id"`
+}
+
+func (u *User) AddSessionID(id string) {
+	u.SessionIDs = append(u.SessionIDs, id)
+	u.SelectedSessionID = id
+}
+
+func (u *User) RemoveSessionID(id string) error {
+	if u.SelectedSessionID == id {
+		return errors.New("cannot remove selected session")
+	}
+
+	for i, sessionID := range u.SessionIDs {
+		if sessionID == id {
+			u.SessionIDs = append(u.SessionIDs[:i], u.SessionIDs[i+1:]...)
+			return nil
+		}
+	}
+
+	return errors.New("id not found")
 }
 
 type UserProfile struct {

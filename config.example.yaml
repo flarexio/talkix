@@ -1,3 +1,10 @@
+baseURL: https://talkix.flarex.io
+
+jwt:
+  issuer: identity.flarex.io
+  audience: talkix.flarex.io
+  jwksURL: https://identity.flarex.io/.well-known/jwks.json
+
 line:
   messaging:
     channelToken: LINE_MESSAGING_API_TOKEN
@@ -15,6 +22,10 @@ identity:
 llm:
   model: openai:gpt-4.1-mini
   # prompt: replace with your prompt here
+  summary:
+    model: openai:gpt-4.1-mini
+  line:
+    model: openai:gpt-4.1
   persistence:
     driver: badger
     name: talkix

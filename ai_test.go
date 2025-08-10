@@ -11,7 +11,6 @@ import (
 
 	"github.com/flarexio/talkix/config"
 	"github.com/flarexio/talkix/llm"
-	"github.com/flarexio/talkix/llm/message"
 )
 
 func TestLLMWithLineMessage(t *testing.T) {
@@ -26,12 +25,8 @@ func TestLLMWithLineMessage(t *testing.T) {
 		return
 	}
 
-	msgs := []message.Message{
-		message.HumanMessage("What is the capital of France?"),
-	}
-
 	ctx := context.Background()
-	msgs, err = llm.Invoke(ctx, msgs)
+	msgs, err := llm.Invoke(ctx, "What is the capital of France?")
 	if err != nil {
 		assert.Fail(err.Error())
 		return
@@ -77,12 +72,8 @@ func TestLLMWithTools(t *testing.T) {
 		return
 	}
 
-	msgs := []message.Message{
-		message.HumanMessage("What is the weather in New York City?"),
-	}
-
 	ctx := context.Background()
-	msgs, err = llm.Invoke(ctx, msgs)
+	msgs, err := llm.Invoke(ctx, "What is the weather in New York City?")
 	if err != nil {
 		assert.Fail(err.Error())
 		return

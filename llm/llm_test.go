@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/flarexio/talkix/llm/message"
 )
 
 func TestLLM(t *testing.T) {
@@ -19,12 +17,8 @@ func TestLLM(t *testing.T) {
 		return
 	}
 
-	msgs := []message.Message{
-		message.HumanMessage("What is the capital of France?"),
-	}
-
 	ctx := context.Background()
-	msgs, err = llm.Invoke(ctx, msgs)
+	msgs, err := llm.Invoke(ctx, "What is the capital of France?")
 	if err != nil {
 		assert.Fail(err.Error())
 		return
@@ -73,12 +67,8 @@ func TestLLMWithStructuredOutput(t *testing.T) {
 		return
 	}
 
-	msgs := []message.Message{
-		message.HumanMessage("What is the capital of France?"),
-	}
-
 	ctx := context.Background()
-	msgs, err = llm.Invoke(ctx, msgs)
+	msgs, err := llm.Invoke(ctx, "What is the capital of France?")
 	if err != nil {
 		assert.Fail(err.Error())
 		return

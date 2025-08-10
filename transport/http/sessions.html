@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session 管理</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; background: #f8f8f8; margin: 0; }
+        .container {
+            max-width: 480px;
+            margin: 2em auto;
+            padding: 1em 1em 6em 1em; /* 底部加padding避免被按鈕遮住 */
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            margin-bottom: 1.2em;
+            padding: 1.2em 1em;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+        }
+        .card.selected {
+            border-color: #1976d2;
+            background: #e3f2fd;
+        }
+        .card.current {
+            border-color: #1DB446;
+            background: #eafff2;
+        }
+        .card.selected.current {
+            border-color: #ff9800;
+            background: #fff8e1;
+        }
+        .card-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 0.5em;
+            color: #1DB446;
+            word-break: break-all;
+        }
+        .card-summary {
+            font-size: 0.9em;
+            color: #444;
+            background: #f5f5f5;
+            padding: 0.5em 0.7em;
+            border-radius: 8px;
+            margin-bottom: 0.7em;
+            border-left: 4px solid #1DB446;
+            line-height: 1.3;
+            max-height: 2.6em;
+            overflow: hidden;
+            position: relative;
+            word-break: break-all;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .card-summary:empty {
+            display: none;
+        }
+        .card-summary.no-summary {
+            color: #aaa;
+            font-style: italic;
+            background: #fafafa;
+            border-left-color: #ddd;
+            font-size: 0.85em;
+        }
+        .card-summary.expanded {
+            white-space: normal;
+            max-height: none;
+            background: #e8f5e8;
+            border-left-color: #4caf50;
+        }
+        .card-summary.expandable {
+            cursor: pointer;
+        }
+        .card-summary.expandable::after {
+            content: '⋯';
+            position: absolute;
+            right: 0.5em;
+            bottom: 0.2em;
+            background: #f5f5f5;
+            color: #888;
+            font-weight: bold;
+        }
+        .card-summary.expanded::after {
+            content: '';
+        }
+        .card-info {
+            font-size: 1em;
+            margin-bottom: 0.3em;
+            color: #333;
+        }
+        .card-label {
+            font-size: 0.95em;
+            color: #888;
+            margin-right: 0.5em;
+        }
+        .actions {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #fff;
+            padding: 1em;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+            border-top: 1px solid #eee;
+            text-align: center;
+            z-index: 1000;
+        }
+        .action-btn {
+            padding: 0.7em 1.2em;
+            margin: 0 0.3em;
+            border: none;
+            border-radius: 6px;
+            background: #1DB446;
+            color: #fff;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .action-btn:hover {
+            background: #16a239;
+        }
+        .action-btn.delete {
+            background: #e74c3c;
+        }
+        .action-btn.delete:hover {
+            background: #c0392b;
+        }
+        .action-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* 彈出視窗樣式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            overflow-y: auto;
+        }
+        .modal-content {
+            background-color: #fff;
+            margin: 2em auto;
+            padding: 2em;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            position: absolute;
+            right: 1em;
+            top: 0.5em;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: #000;
+        }
+        .modal-header {
+            color: #1DB446;
+            margin-bottom: 1.5em;
+            padding-bottom: 0.5em;
+            border-bottom: 2px solid #1DB446;
+        }
+        .session-info {
+            background: #f0f8ff;
+            padding: 1em;
+            border-radius: 8px;
+            margin-bottom: 1.5em;
+            border-left: 4px solid #1976d2;
+        }
+        .session-summary {
+            background: #f9f9f9;
+            padding: 1em;
+            border-radius: 8px;
+            margin-bottom: 1.5em;
+            font-style: italic;
+        }
+        .conversation {
+            margin-bottom: 1.5em;
+            padding: 1em;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .conversation-header {
+            font-weight: bold;
+            color: #1DB446;
+            margin-bottom: 1em;
+            padding-bottom: 0.5em;
+            border-bottom: 1px solid #eee;
+        }
+        .message {
+            margin-bottom: 1em;
+            padding: 1em;
+            border-radius: 8px;
+            position: relative;
+            clear: both;
+        }
+        .message:last-child {
+            margin-bottom: 0;
+        }
+        .human {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            margin-left: 1em;
+        }
+        .ai {
+            background: #f1f8e9;
+            border-left: 4px solid #4caf50;
+            margin-right: 1em;
+        }
+        .message-role {
+            font-weight: bold;
+            font-size: 0.9em;
+            margin-bottom: 0.5em;
+            text-transform: uppercase;
+        }
+        .human .message-role {
+            color: #1976d2;
+        }
+        .ai .message-role {
+            color: #4caf50;
+        }
+        .message-content {
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .json-content {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1em;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 0.5em 0;
+            border: 1px solid #4a5568;
+        }
+        .no-conversations {
+            text-align: center;
+            color: #888;
+            font-style: italic;
+            padding: 2em;
+        }
+        .loading {
+            text-align: center;
+            color: #1DB446;
+            padding: 2em;
+        }
+
+        /* 清除浮動 */
+        .conversation::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* 新增的樣式 */
+        .conversation-section {
+            margin-bottom: 1.5em;
+            background: #fafafa;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            background: #e8f5e8;
+            padding: 0.8em 1em;
+            font-weight: bold;
+            color: #2e7d32;
+            border-bottom: 1px solid #c8e6c9;
+            font-size: 0.95em;
+        }
+        
+        .section-content {
+            padding: 1em;
+        }
+        
+        .io-message {
+            margin-bottom: 1em;
+            padding: 1em;
+            border-radius: 8px;
+            position: relative;
+            clear: both;
+        }
+        
+        .io-message:last-child {
+            margin-bottom: 0;
+        }
+        
+        .io-input {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            margin-left: 1em;
+        }
+        
+        .io-output {
+            background: #f1f8e9;
+            border-left: 4px solid #4caf50;
+            margin-right: 1em;
+        }
+        
+        .io-role {
+            font-weight: bold;
+            font-size: 0.9em;
+            margin-bottom: 0.5em;
+            text-transform: uppercase;
+        }
+        
+        .io-input .io-role {
+            color: #1976d2;
+        }
+        
+        .io-output .io-role {
+            color: #4caf50;
+        }
+        
+        .io-content {
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .format-section {
+            background: #fff3e0;
+            border: 1px solid #ffcc02;
+        }
+        
+        .format-section .section-header {
+            background: #ffecb3;
+            color: #e65100;
+            border-bottom-color: #ffcc02;
+        }
+        
+        .format-content {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1em;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 0;
+            border: 1px solid #4a5568;
+            border-radius: 6px;
+        }
+        
+        .no-format {
+            color: #888;
+            font-style: italic;
+            padding: 1em;
+            text-align: center;
+        }
+
+        @media (max-width: 600px) {
+            .container { 
+                padding: 0.5em 0.5em 6em 0.5em; 
+            }
+            .card { 
+                padding: 1em 0.7em; 
+            }
+            .card-title { 
+                font-size: 1.1em; 
+            }
+            .action-btn {
+                padding: 0.8em 1em;
+                font-size: 0.85em;
+                margin: 0 0.2em;
+            }
+            .modal {
+                overflow: hidden;
+            }
+            .modal-content {
+                margin: 0;
+                padding: 1em;
+                width: 100%;
+                height: 100vh;
+                max-width: none;
+                max-height: none;
+                border-radius: 0;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .close {
+                position: fixed;
+                right: 1em;
+                top: 1em;
+                font-size: 24px;
+                z-index: 100;
+                background: rgba(255,255,255,0.9);
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            }
+            .modal-header {
+                margin-bottom: 1em;
+                padding-right: 0;
+                font-size: 1.2em;
+                /* 移除 position: sticky */
+                position: static;
+                background: transparent;
+                padding-top: 0;
+                padding-bottom: 0.5em;
+                border-bottom: 2px solid #1DB446;
+                margin-top: 0;
+            }
+            .message {
+                margin-bottom: 0.8em;
+                padding: 0.8em;
+                font-size: 0.9em;
+            }
+            .human {
+                margin-left: 0.2em;
+            }
+            .ai {
+                margin-right: 0.2em;
+            }
+            .conversation {
+                padding: 0.8em;
+                margin-bottom: 1em;
+            }
+            .conversation-header {
+                font-size: 0.9em;
+                margin-bottom: 0.8em;
+            }
+            .session-info,
+            .session-summary {
+                padding: 0.8em;
+                margin-bottom: 1em;
+                font-size: 0.9em;
+            }
+            .message-role {
+                font-size: 0.8em;
+                margin-bottom: 0.3em;
+            }
+            .message-content {
+                font-size: 0.9em;
+                line-height: 1.4;
+                word-wrap: break-word;
+            }
+            .json-content {
+                font-size: 0.8em;
+                padding: 0.8em;
+                margin: 0.3em 0;
+            }
+        }
+    </style>
+    <script>
+    localStorage.setItem('jwt_token', '{{.JWT}}');
+    localStorage.setItem('user', '{{.User}}');
+
+    let selectedSessionId = null;
+
+    function selectCard(id) {
+        selectedSessionId = id;
+        document.querySelectorAll('.card').forEach(card => {
+            card.classList.remove('selected');
+        });
+        document.getElementById('card-' + id).classList.add('selected');
+        updateButtonStates();
+    }
+
+    function createSession() {
+        const userId = localStorage.getItem('user');
+        fetch('/users/' + userId + '/sessions', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('jwt_token'),
+                'Content-Type': 'application/json'
+            }
+        }).then(res => {
+            if (res.ok) {
+                reloadSessions();
+            } else {
+                alert('建立失敗');
+            }
+        });
+    }
+
+    function reloadSessions() {
+        const userId = localStorage.getItem('user');
+        fetch('/users/' + userId + '/sessions', {
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('jwt_token')
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            renderSessions(data.sessions, data.selected_session_id);
+        })
+        .catch(() => {
+            document.getElementById('sessionsContainer').innerHTML = '<div style="text-align:center; color:#e74c3c; margin-top:2em;">載入失敗</div>';
+        });
+    }
+
+    function renderSessions(sessions, currentSessionId) {
+        const container = document.getElementById('sessionsContainer');
+        container.innerHTML = '';
+        
+        const actionsDiv = document.getElementById('actions');
+        
+        if (sessions.length === 0) {
+            container.innerHTML = '<div style="text-align:center; color:#888; margin-top:2em;">目前沒有任何會話</div>';
+            actionsDiv.style.display = 'none';
+            return;
+        }
+
+        sessions.sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt));
+
+        sessions.forEach(s => {
+            const conversationN = Array.isArray(s.Conversations) ? s.Conversations.length : 0;
+            const card = document.createElement('div');
+            card.className = 'card';
+            if (s.ID === currentSessionId) card.classList.add('current');
+            if (s.ID === selectedSessionId) card.classList.add('selected');
+            card.id = 'card-' + s.ID;
+            card.onclick = () => selectCard(s.ID);
+
+            let dt = new Date(s.CreatedAt);
+            let y = dt.getFullYear();
+            let m = String(dt.getMonth() + 1).padStart(2, '0');
+            let d = String(dt.getDate()).padStart(2, '0');
+            let h = String(dt.getHours()).padStart(2, '0');
+            let min = String(dt.getMinutes()).padStart(2, '0');
+            let sec = String(dt.getSeconds()).padStart(2, '0');
+            let formatted = `${y}-${m}-${d} ${h}:${min}:${sec}`;
+
+            let summaryHtml;
+            if (s.Summary && s.Summary.trim()) {
+                const isLongSummary = s.Summary.length > 30;
+                const expandableClass = isLongSummary ? 'expandable' : '';
+                summaryHtml = `<div class="card-summary ${expandableClass}" title="${s.Summary}" onclick="toggleSummary(event, '${s.ID}')">${s.Summary}</div>`;
+            } else {
+                summaryHtml = `<div class="card-summary no-summary">尚無摘要</div>`;
+            }
+
+            const currentBadge = s.ID === currentSessionId ? ' (目前)' : '';
+
+            card.innerHTML = `
+                ${summaryHtml}
+                <div class="card-info">
+                    <span class="card-label">訊息數：</span>${conversationN}${currentBadge}
+                </div>
+                <div class="card-info">
+                    <span class="card-label">建立時間：</span>${formatted}
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+        actionsDiv.style.display = 'block';
+        updateButtonStates();
+    }
+
+    function switchSession() {
+        if (!selectedSessionId) {
+            alert('請先選擇一個會話');
+            return;
+        }
+
+        const userId = localStorage.getItem('user');
+        fetch('/users/' + userId + '/sessions/' + selectedSessionId, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('jwt_token'),
+                'Content-Type': 'application/json'
+            }
+        }).then(res => {
+            if (res.ok) {
+                reloadSessions();
+            } else {
+                alert('切換失敗');
+            }
+        });
+    }
+
+    function deleteSession() {
+        if (!selectedSessionId) {
+            alert('請先選擇一個會話');
+            return;
+        }
+
+        if (!confirm('確定要刪除這個會話嗎？')) return;
+        
+        const userId = localStorage.getItem('user');
+        fetch('/users/' + userId + '/sessions/' + selectedSessionId, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('jwt_token'),
+                'Content-Type': 'application/json'
+            }
+        }).then(res => {
+            if (res.ok) {
+                selectedSessionId = null;
+                reloadSessions();
+            } else {
+                alert('刪除失敗');
+            }
+        });
+    }
+
+    function viewSession() {
+        if (!selectedSessionId) {
+            alert('請先選擇一個會話');
+            return;
+        }
+
+        // 顯示彈出視窗
+        const modal = document.getElementById('sessionModal');
+        const modalContent = document.getElementById('modalSessionContent');
+        
+        // 顯示載入中
+        modalContent.innerHTML = '<div class="loading">載入會話詳情中...</div>';
+        modal.style.display = 'block';
+
+        // 載入會話詳情
+        const userId = localStorage.getItem('user');
+        fetch('/users/' + userId + '/sessions/' + selectedSessionId, {
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('jwt_token')
+            }
+        })
+        .then(res => res.json())
+        .then(data => {
+            renderSessionDetails(data);
+        })
+        .catch(err => {
+            console.error('載入會話詳情失敗:', err);
+            modalContent.innerHTML = '<div class="no-conversations">載入會話詳情失敗</div>';
+        });
+    }
+
+    function renderSessionDetails(session) {
+        const modalContent = document.getElementById('modalSessionContent');
+        
+        // 會話基本信息
+        let sessionInfoHtml = `
+            <div class="session-info">
+                <div><strong>會話 ID:</strong> ${session.ID}</div>
+                <div><strong>建立時間:</strong> ${formatDateTime(session.CreatedAt)}</div>
+                <div><strong>對話總數:</strong> ${session.Conversations ? session.Conversations.length : 0}</div>
+            </div>
+        `;
+
+        // 會話摘要
+        let summaryHtml = '';
+        if (session.Summary && session.Summary.trim()) {
+            summaryHtml = `
+                <div class="session-summary">
+                    <strong>會話摘要:</strong>
+                    <div>${escapeHtml(session.Summary)}</div>
+                </div>
+            `;
+        }
+
+        // 對話列表
+        let conversationsHtml = '';
+        if (!session.Conversations || session.Conversations.length === 0) {
+            conversationsHtml = '<div class="no-conversations">此會話還沒有任何對話記錄</div>';
+        } else {
+            session.Conversations.forEach((conv, index) => {
+                conversationsHtml += `
+                    <div class="conversation">
+                        <div class="conversation-header">對話 #${index + 1} - ${formatDateTime(conv.CreatedAt)}</div>
+                `;
+                
+                // Input/Output 區段 (主要 LLM 的對話)
+                if (conv.Input || conv.Output) {
+                    conversationsHtml += `
+                        <div class="conversation-section">
+                            <div class="section-header">💬 主要對話</div>
+                            <div class="section-content">
+                    `;
+                    
+                    if (conv.Input) {
+                        conversationsHtml += `
+                            <div class="io-message io-input">
+                                <div class="io-role">用戶</div>
+                                <div class="io-content">${escapeHtml(conv.Input)}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    if (conv.Output) {
+                        conversationsHtml += `
+                            <div class="io-message io-output">
+                                <div class="io-role">助手</div>
+                                <div class="io-content">${escapeHtml(conv.Output)}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    conversationsHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                // Format 區段 (LINE 格式化輸出)
+                if (conv.Format) {
+                    conversationsHtml += `
+                        <div class="conversation-section format-section">
+                            <div class="section-header">📱 LINE 格式化輸出</div>
+                            <div class="section-content">
+                    `;
+                    
+                    let prettyFormat;
+                    try {
+                        // 檢查 conv.Format 是否已經是物件
+                        if (typeof conv.Format === 'object') {
+                            // 如果已經是物件，直接格式化
+                            prettyFormat = JSON.stringify(conv.Format, null, 2);
+                        } else if (typeof conv.Format === 'string') {
+                            // 如果是字串，嘗試解析後再格式化
+                            const formatObj = JSON.parse(conv.Format);
+                            prettyFormat = JSON.stringify(formatObj, null, 2);
+                        } else {
+                            // 其他情況，轉換為字串
+                            prettyFormat = String(conv.Format);
+                        }
+                        conversationsHtml += `<pre class="format-content">${escapeHtml(prettyFormat)}</pre>`;
+                    } catch (e) {
+                        // 如果解析失敗，直接顯示原始內容
+                        conversationsHtml += `<pre class="format-content">${escapeHtml(String(conv.Format))}</pre>`;
+                    }
+                    
+                    conversationsHtml += `
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    conversationsHtml += `
+                        <div class="conversation-section format-section">
+                            <div class="section-header">📱 LINE 格式化輸出</div>
+                            <div class="no-format">無格式化輸出</div>
+                        </div>
+                    `;
+                }
+                
+                conversationsHtml += '</div>';
+            });
+        }
+
+        modalContent.innerHTML = sessionInfoHtml + summaryHtml + conversationsHtml;
+    }
+
+    function closeModal() {
+        document.getElementById('sessionModal').style.display = 'none';
+    }
+
+    function formatDateTime(dateString) {
+        const date = new Date(dateString);
+        return date.toLocaleString('zh-TW', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function toggleSummary(event, sessionId) {
+        event.stopPropagation(); // 防止觸發卡片選擇
+        const summaryEl = event.target;
+        summaryEl.classList.toggle('expanded');
+    }
+
+    function updateButtonStates() {
+        const viewBtn = document.querySelector('button[onclick="viewSession()"]');
+        const switchBtn = document.querySelector('button[onclick="switchSession()"]');
+        const deleteBtn = document.querySelector('button[onclick="deleteSession()"]');
+        
+        if (selectedSessionId) {
+            viewBtn.disabled = false;
+            switchBtn.disabled = false;
+            deleteBtn.disabled = false;
+        } else {
+            viewBtn.disabled = true;
+            switchBtn.disabled = true;
+            deleteBtn.disabled = true;
+        }
+    }
+
+    // 點擊彈出視窗外部關閉視窗
+    window.onclick = function(event) {
+        const modal = document.getElementById('sessionModal');
+        if (event.target === modal) {
+            closeModal();
+        }
+    }
+
+    window.onload = reloadSessions;
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1 style="text-align:center; color:#1DB446;">會話管理</h1>
+        <div style="text-align:right; margin-bottom:1em;">
+            <button class="action-btn" onclick="createSession()">建立新會話</button>
+        </div>
+        <div id="sessionsContainer"></div>
+    </div>
+    <div id="actions" class="actions">
+        <button class="action-btn" onclick="viewSession()">查看會話</button>
+        <button class="action-btn" onclick="switchSession()">切換會話</button>
+        <button class="action-btn delete" onclick="deleteSession()">刪除會話</button>
+    </div>
+
+    <!-- 彈出視窗 -->
+    <div id="sessionModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 class="modal-header">會話詳情</h2>
+            <div id="modalSessionContent">
+                <!-- 會話詳情內容將在這裡顯示 -->
+            </div>
+        </div>
+    </div>
+</body>
+</html>
